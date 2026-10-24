@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>EVAN (이희승) - iOS Mock Simulator V20</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <style>
+    .ios-glass {
+      background: rgba(255, 255, 255, 0.25);
+      backdrop-filter: blur(25px);
+      -webkit-backdrop-filter: blur(25px);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .dynamic-island {
+      width: 110px;
+      height: 30px;
+      background-color: black;
+      border-radius: 20px;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .ios-icon-shadow {
+      box-shadow: 0 4px 14px 0 rgba(0, 0, 0, 0.25), inset 0 1px 1px 0 rgba(255, 255, 255, 0.35);
+    }
+    @keyframes pulse-up {
+      0% { transform: translateY(0); opacity: 0.8; }
+      50% { transform: translateY(-6px); opacity: 1; }
+      100% { transform: translateY(0); opacity: 0.8; }
+    }
+    .animate-pulse-up { animation: pulse-up 2s infinite ease-in-out; }
+  </style>
+</head>
+<body class="bg-slate-900 min-h-screen flex items-center justify-center font-sans antialiased selection:bg-rose-500 selection:text-white">
+
+  <div id="app" class="w-full h-full flex items-center justify-center p-0 sm:p-4">
+    <!-- PC 端 iPhone 机身容器 -->
+    <div class="relative w-full sm:w-[390px] h-[100vh] sm:h-[844px] bg-black sm:rounded-[50px] shadow-2xl border-0 sm:border-[12px] border-slate-800 overflow-hidden flex flex-col justify-between select-none">
+      
+      <!-- 顶部 iOS 状态栏 -->
+      <div class="absolute top-0 left-0 right-0 z-50 h-11 px-6 flex justify-between items-center text-white text-xs font-semibold pointer-events-none">
+        <span>{{ currentTime }}</span>
+        <div class="dynamic-island flex items-center justify-center text-[10px] text-gray-400">
+          <span v-if="audioState.isPlaying" class="text-rose-400 animate-pulse mr-1">🎵</span>
+          <span v-if="audioState.isPlaying" class="truncate max-w-[70px] text-[9px] text-white">{{ audioState.currentSong }}</span>
+        </div>
+        <div class="flex items-center space-x-1.5">
+          <span>5G</span>
+          <div class="w-5 h-2.5 border border-white/80 rounded-sm p-0.5 flex items-center">
+            <div class="h-full bg-white rounded-xs w-[76%]"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 全局 iOS 顶部 Notification Banner (3秒自动消失 + 动态去重) -->
+      <transition enter-active-class="transform transition ease-out duration-300" enter-from-class="-translate-y-full opacity-0" enter-to-class="translate-y-0 opacity-100" leave-active-class="transform transition ease-in duration-200" leave-from-class="translate-y-0 opacity-100" leave-to-class="-translate-y-full opacity-0">
+        <div v-if="activeNotification" 
+             @touchstart="notifTouchStart"
+             @touchmove="notifTouchMove"
+             @touchend="notifTouchEnd"
+             @click="handleNotificationClick(activeNotification)" 
+             :style="{ transform: `translateY(${notifOffsetY}px)`, transition: isSwiping ? 'none' : 'transform 0.2s ease-out' }"
+             class="absolute top-12 left-3 right-3 z-50 bg-white/95 backdrop-blur-xl rounded-2xl p-3 shadow-2xl border border-white/50 cursor-pointer flex items-start space-x-3 active:scale-98">
+          <div class="w-7 h-7 flex-shrink-0" v-html="getAppIconSvg(activeNotification.targetApp)"></div>
+          <div class="flex-1 min-w-0">
+            <div class="flex justify-between items-center">
+              <span class="text-xs font-bold text-gray-900">{{ activeNotification.app }} • {{ activeNotification.title }}</span>
+              <div class="flex items-center space-x-2">
+                <span class="text-[9px] text-gray-400">방금전</span>
+                <button @click.stop="closeNotification" class="w-5 h-5 rounded-full bg-gray-200 hover:bg-gray-300 text-gray-700 flex items-center justify-center text-xs font-bold">✕</button>
+              </div>
+            </div>
+            <p class="text-xs text-gray-800 mt-0.5 truncate font-medium">{{ activeNotification.message }}</p>
+            <p class="text-[10px] text-gray-500 truncate mt-0.5">{{ activeNotification.cn }}</p>
+          </div>
+        </div>
+      </transition>
+
+      <!-- 屏幕主体区域 -->
+      <div class="relative w-full h-full bg-cover bg-center overflow-hidden flex flex-col" 
+           @touchstart="lockTouchStart" 
+           @touchend="lockTouchEnd"
+           style="background-image: url('P1.jpg')">
+
+        <!-- 1. 锁屏界面 -->
+        <div v-if="story.isLocked" class="w-full h-full flex flex-col justify-between pt-16 pb-10 px-6 text-white text-center bg-black/35 backdrop-blur-sm z-40">
+          <div>
+            <div class="text-sm font-medium opacity-80">10월 24일 토요일 (10月24日)</div>
+            <div class="text-6xl font-extralight tracking-tight mt-1">{{ currentTime }}</div>
+          </div>
+
+          <div class="w-full max-w-[260px] mx-auto mb-6 flex flex-col items-center">
+            <template v-if="!showPasscodePad">
+              <div @click="showPasscodePad = true" class="cursor-pointer py-4 flex flex-col items-center space-y-2 animate-pulse-up">
+                <div class="w-10 h-1 bg-white/70 rounded-full"></div>
+                <span class="text-xs text-white/80 font-light tracking-wide">위로 쓸어올려 잠금 해제 (上滑解锁)</span>
+              </div>
+            </template>
+            <template v-else>
+              <div class="text-xs mb-3 text-white/90 font-light">비밀번호 입력 (생일 1015)</div>
+              <div class="flex justify-center space-x-4 mb-6">
+                <div v-for="i in 4" :key="i" class="w-3.5 h-3.5 rounded-full border border-white" :class="inputPasscode.length >= i ? 'bg-white' : 'bg-transparent'"></div>
+              </div>
+              <div class="grid grid-cols-3 gap-4 text-center">
+                <button v-for="num in [1,2,3,4,5,6,7,8,9,0]" :key="num" @click="pressPasscode(num)" class="w-14 h-14 rounded-full bg-white/20 backdrop-blur-md text-xl font-light mx-auto flex items-center justify-center active:bg-white/40">
+                  {{ num }}
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 2. 主屏幕 -->
+        <div v-else-if="!story.activeApp" class="w-full h-full pt-16 pb-20 px-5 grid grid-cols-4 gap-y-6 gap-x-4 content-start z-10">
+          <div v-for="app in appList" :key="app.id" @click="openApp(app.id)" class="flex flex-col items-center cursor-pointer group">
+            <div class="relative w-[58px] h-[58px] rounded-[15px] overflow-hidden ios-icon-shadow transition-transform group-active:scale-90 flex items-center justify-center">
+              <div class="w-full h-full" v-html="app.svg"></div>
+              <span v-if="getAppBadge(app.id) > 0" class="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white shadow-md">
+                {{ getAppBadge(app.id) }}
+              </span>
+            </div>
+            <span class="text-[11px] text-white mt-1.5 font-medium shadow-sm drop-shadow-md tracking-tight">{{ app.name }}</span>
+          </div>
+        </div>
+
+        <!-- 3. 具体 App 界面 -->
+        <div v-else class="w-full h-full pt-11 pb-6 bg-white text-gray-900 z-20 flex flex-col overflow-hidden">
+          <app-kakaotalk v-if="story.activeApp === 'kakaotalk'" :story="story" @trigger-stage="advanceStage"></app-kakaotalk>
+          <app-x-twitter v-if="story.activeApp === 'x'" :story="story"></app-x-twitter>
+          <app-instagram v-if="story.activeApp === 'instagram'" :story="story" @preview-image="openLightbox"></app-instagram>
+          <app-apple-music v-if="story.activeApp === 'applemusic'" :story="story" :audio-state="audioState" @play-song="playSong" @toggle-play="togglePlay" @seek-audio="seekAudio"></app-apple-music>
+          <app-safari v-if="story.activeApp === 'safari'" :story="story"></app-safari>
+          <app-notes v-if="story.activeApp === 'notes'" :story="story"></app-notes>
+          <app-settings v-if="story.activeApp === 'settings'" :story="story" @advance-stage="advanceStage"></app-settings>
+          <app-weather v-if="story.activeApp === 'weather'"></app-weather>
+          <app-phone v-if="story.activeApp === 'phone'" :story="story"></app-phone>
+          <app-calendar v-if="story.activeApp === 'calendar'" :story="story"></app-calendar>
+          <app-photos v-if="story.activeApp === 'photos'" :story="story" @preview-image="openLightbox"></app-photos>
+        </div>
+
+      </div>
+
+      <!-- 全局大图预览 Lightbox -->
+      <div v-if="lightboxUrl" @click="closeLightbox" class="absolute inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 cursor-pointer">
+        <div class="relative max-w-full max-h-full">
+          <img :src="lightboxUrl" class="max-w-[360px] max-h-[750px] object-contain rounded-xl shadow-2xl border border-white/20">
+          <button @click="closeLightbox" class="absolute -top-10 right-0 text-white bg-white/20 hover:bg-white/40 rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold">✕</button>
+        </div>
+      </div>
+
+      <!-- 底部 iOS Home Bar -->
+      <div @click="goHome" class="absolute bottom-1.5 left-0 right-0 z-50 flex justify-center items-center py-1 cursor-pointer group">
+        <div class="w-32 h-1 bg-white/80 rounded-full group-hover:bg-white transition-all group-active:w-28"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    /* 🔑 OpenRouter API Key 配置 */
+    const OPENROUTER_API_KEY = "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";
+
+    /* 👤 默认灰色人头 SVG */
+    const DEFAULT_AVATAR_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23E5E7EB'/><circle cx='50' cy='38' r='18' fill='%239CA3AF'/><path d='M20 82 C20 62 32 54 50 54 C68 54 80 62 80 82 Z' fill='%239CA3AF'/></svg>";
+
+    /* 🛡️ API 解析防错与极简口语生成器 */
+    async function callOpenRouterAPI(characterRolePrompt, userMsg) {
+      try {
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+            "HTTP-Referer": window.location.origin || "https://localhost",
+            "X-Title": "iOS Simulator",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "openrouter/free",
+            messages: [
+              { 
+                role: "system", 
+                content: `${characterRolePrompt}\n【严格规则】：\n1. 必须精准围绕玩家发的内容回复。\n2. 极简日常口语化（1~2句短句）。\n3. 严禁出现 User Safety:、safe、finish_reason、[object Object] 等调试字符。\n4. 排版格式：\n韩文口语\n(中文翻译)` 
+              },
+              { role: "user", content: userMsg }
+            ]
+          })
+        });
+
+        if (!res.ok) return "응 고마워~ 밥 잘 챙겨 먹을게!\n(嗯谢谢~ 饭会好好吃的！)";
+        const data = await res.json();
+        let rawContent = data.choices?.[0]?.message?.content || "";
+        rawContent = rawContent.replace(/User Safety:.*$/gi, '').replace(/\[object Object\]/g, '').replace(/finish_reason:.*$/gi, '').trim();
+        return rawContent || "응 알겠어! 이따 보자~\n(嗯知道了！待会儿见~)";
+      } catch (e) {
+        return "응 알겠어! 이따 보자~\n(嗯知道了！待会儿见~)";
+      }
+    }
+
+    /* 100 条独一无二、真实细腻的 IG 与 Twitter 粉丝私信生成器 */
+    function generate100UniqueDMs(isTwitter) {
+      const msgs = [];
+      const fanPhrases = [
+        { kr: "오빠 이번 타이틀곡 진짜 미쳤어요ㅠㅠ 매일 듣는 중!", cn: "哥哥这次的主打歌真的绝了呜呜！每天都在单曲循环！" },
+        { kr: "프라다 가방이랑 노을 배경 사진 너무 잘 어울려요 🖤", cn: "Prada包包和晚霞背景的照片太搭了 🖤" },
+        { kr: "오늘 한강공원 산책하다가 오빠 노래 들었는데 힐링 그 자체...", cn: "今天在汉江公园散步时听了哥哥的歌，简直是治愈本身..." },
+        { kr: "음악 방송 사녹 때 핑크색 스노우슈트 진짜 레전드였음 🤨", cn: "打歌预录时的粉色滑雪服真的是传说级 🤨" },
+        { kr: "솔로 앨범 전곡 작사작곡 참여했다는 소식 듣고 울컥했어요.", cn: "听到全专参与作词作曲的消息时感动得快哭了。" },
+        { kr: "길에서 만나면 눈썹 만지기 암호 맞죠? 꼭 실천해볼게요 ㅎㅎ", cn: "在路上遇到的话要摸眉毛对吧？一定去实践哈哈。" },
+        { kr: "체력 관리 잘하시고 오늘 저녁은 맛있는 거 드세요!", cn: "体力要好好管理，今晚吃点好吃的哦！" },
+        { kr: "해외 팬들도 이번 앨범 반응 진짜 뜨거워요! 대박 나자자~", cn: "海外粉丝对这次专辑的反应也超火爆！一定要大发~" },
+        { kr: "복숭아 아이스티 마시면서 작업하시나요? 레시피 궁금해요!", cn: "工作时会喝桃子冰茶吗？好想知道秘方！" },
+        { kr: "언제나 오빠의 음악적 소신을 응원합니다. 파이팅!", cn: "一直支持哥哥的音乐信念。加油！" }
+      ];
+
+      const myReplies = [
+        { kr: "고마워요! 앞으로도 좋은 음악 들려줄게요 🎵", cn: "谢谢你们！以后也会带来好音乐的 🎵" },
+        { kr: "햄스터단 암호 통과! ㅋㅋㅋ 다들 감기 조심해요.", cn: "仓鼠团暗号通关！哈哈大家小心感冒。" },
+        { kr: "오늘 한강 바람 시원하고 좋더라고요. 고마워요!", cn: "今天汉江的风很凉爽舒服。谢谢你们！" },
+        { kr: "열심히 준비한 보람이 있네요. 앨범 많이 사랑해주세요.", cn: "努力准备得很值得。请多多爱护专辑。" },
+        { kr: "응원 덕분에 오늘도 힘내서 작업합니다!", cn: "多亏了应援，今天也在努力做曲子呢！" }
+      ];
+
+      for (let i = 1; i <= 100; i++) {
+        const isMe = i % 2 === 0;
+        const phrase = isMe ? myReplies[i % myReplies.length] : fanPhrases[i % fanPhrases.length];
+        msgs.push({
+          sender: isMe ? 'me' : 'other',
+          text: `${phrase.kr} (${i})`,
+          cn: `${phrase.cn} (${i})`,
+          time: i > 80 ? '방금 전' : `${Math.floor(i/10)}시간 전`
+        });
+      }
+      return msgs;
+    }
+
+    /* 50条以上的真实通话记录生成器 */
+    function generate50CallLogs() {
+      const logs = [
+        { name: '엄마 ❤️', type: '수신 (接听)', time: '방금 전', duration: '05:40', isHater: false },
+        { name: '아빠 🏀', type: '수신 (接听)', time: '10분 전', duration: '03:12', isHater: false },
+        { name: '형 ⚽', type: '발신 (拨出)', time: '30분 전', duration: '01:50', isHater: false },
+        { name: 'apro 형 🎵', type: '발신 (拨出)', time: '1시간 전', duration: '02:15', isHater: false },
+        { name: 'Chloe (Staff) 📋', type: '수신 (接听)', time: '어제', duration: '04:10', isHater: false }
+      ];
+      const extraNames = ['스태프 민수', '메이크업 실장님', '안무가 쌤', '유튜브 편집자', '고등학교 친구 준호'];
+      for (let i = 6; i <= 52; i++) {
+        logs.push({
+          name: extraNames[i % extraNames.length] + ` (${i})`,
+          type: i % 2 === 0 ? '수신 (接听)' : '발신 (拨出)',
+          time: `${i}일 전`,
+          duration: `0${i%4}:2${i%5}`,
+          isHater: false
+        });
+      }
+      return logs;
+    }
+
+    /* 35+ 条丰富且永不重复的弹窗语料池 */
+    const NOTIF_POOL = [
+      { id: 'n1', app: '𝕏', title: '@anti_haters', message: '솔로 곡 반응 별로인데... 혼자 성적 낼 수 있냐 ㅋㅋㅋ', cn: 'Solo歌曲反应一般... 一个人能出成绩吗 哈哈', targetApp: 'x' },
+      { id: 'n2', app: '𝕏', title: '@ever_love', message: '희승아 음악성 진짜 미쳤어 ㅠㅠ 평생 응원할게!', cn: '羲承啊音乐性真的炸裂 呜呜 一辈子支持你！', targetApp: 'x' },
+      { id: 'n3', app: 'Instagram', title: 'kpop_critic_01', message: '이번 콘셉트 너무 무리수 아닌가?', cn: '这次的概念是不是有点太勉强了？', targetApp: 'instagram' },
+      { id: 'n4', app: 'Instagram', title: 'h_evva_n_fan', message: '전곡 프로듀싱 실화냐... 완벽한 아티스트 이희승💎', cn: '全专参与制作是真的吗... 完美的艺术家李羲承💎', targetApp: 'instagram' },
+      { id: 'n5', app: 'KakaoTalk', title: 'apro (Producer)', message: 'HEE! Death of Me 앨범 Apple Music에 올라갔다!', cn: 'HEE！Death of Me 专辑已上线 Apple Music！', targetApp: 'applemusic', chatId: 'apro' },
+      { id: 'n6', app: 'KakaoTalk', title: 'Chloe (Staff)', message: '희승님, 내일 사녹 의상 피팅 및 녹음 일정 체크해주세요.', cn: '羲承nim，请查看明天预录服装试穿及录音行程。', targetApp: 'kakaotalk', chatId: 'chloe' },
+      { id: 'n7', app: 'Apple Music', title: '차트 1위', message: '《Death of Me》 정규 1집 전곡 차트인 성공!', cn: '《Death of Me》正规 1 辑全专成功 Chart-in！', targetApp: 'applemusic' },
+      { id: 'n8', app: '𝕏', title: '@ever_hee', message: 'Going Home 들으면서 울었음... 희승이의 진심이 느껴져', cn: '听着 Going Home 哭了... 能感受到羲承的真心', targetApp: 'x' },
+      { id: 'n9', app: 'Instagram', title: 'h_evva_n', message: '팔로워 5.3M 돌파! 팬들의 응원이 쇄도하고 있습니다.', cn: '粉丝突破 530 万！粉丝们的鼓励狂涌而至。', targetApp: 'instagram' },
+      { id: 'n10', app: 'KakaoTalk', title: '엄마', message: '희승아! 노래 너무 좋다... 우리 아들 최고야!', cn: '羲承啊！歌太好听了... 我们儿子最棒！', targetApp: 'kakaotalk', chatId: 'mom' },
+      { id: 'n11', app: '𝕏', title: '@bambi_jp', message: 'ヒスンくんの新曲、毎日リピートしてます！', cn: '羲承君的新歌每天都在单曲循环！', targetApp: 'x' },
+      { id: 'n12', app: 'Instagram', title: 'evvan_vibe', message: '프라다 백 룩북 진짜 잘 어울려요 🖤', cn: 'Prada包包Lookbook真的太适合了 🖤', targetApp: 'instagram' },
+      { id: 'n13', app: 'KakaoTalk', title: '아들바보 아빠', message: '주말에 농구 한판 뛰러 오라니까?', cn: '周末真的不来打场篮球吗？', targetApp: 'kakaotalk', chatId: 'dad' },
+      { id: 'n14', app: 'KakaoTalk', title: '친형', message: '야 롤(LOL) 듀오이나 한 판 돌리자 ㅋㅋ', cn: '喂开黑打盘LOL双排吧哈哈', targetApp: 'kakaotalk', chatId: 'brother' },
+      { id: 'n15', app: '𝕏', title: '@global_hee', message: 'Heeseung is rewriting K-pop history with this masterpiece.', cn: 'Heeseung正在用这部杰作重写K-pop历史。', targetApp: 'x' }
+    ];
+
+    const INITIAL_STORY_STATE = {
+      currentStage: 1,
+      passcode: "1015",
+      isLocked: true,
+      activeApp: null,
+
+      /* KakaoTalk: 每个人 16+ 条严格隔离的真实双向对话，绝无混淆与前缀 */
+      kakaotalk: {
+        activeChatId: null,
+        contacts: [
+          {
+            id: 'mom', name: '엄마 (妈妈)', firstChar: '엄', bgColor: 'bg-rose-400',
+            systemPrompt: '你是李羲承的妈妈。关心他的饮食、睡眠与拱辰丹。语气温暖亲切。',
+            unread: 2,
+            messages: [
+              { sender: 'mom', text: '희승아, 오늘 아침에 홍삼이랑 공진단 꼭 챙겨 먹었지?', cn: '羲承啊，今天早上红参和拱辰丹都有好好吃吧？', time: '08:00' },
+              { sender: 'me', text: '응 엄마, 일어나자마자 바로 먹었어! 걱정 마세요.', cn: '嗯妈妈，一醒来就马上吃了！别担心。', time: '08:05' },
+              { sender: 'mom', text: '그래, 요즘 솔로 활동 준비하느라 피곤할 텐데 밥 거르지 마.', cn: '好，最近准备solo活动肯定很累，饭可别落下。', time: '08:10' },
+              { sender: 'me', text: '스태프들이 맛있는 김치찌개 사주셔서 든든하게 먹었어.', cn: '工作人员请我吃了好吃的泡菜汤，吃得很饱。', time: '08:15' },
+              { sender: 'mom', text: '우리 아들 장하다. 밤늦게 작업한다고 너무 무리하지 말고.', cn: '我们儿子真棒。别因为深夜做曲子太拼了。', time: '09:00' },
+              { sender: 'me', text: '알겠어 엄마! 주말에 숙소 들어가서 푹 잘게요.', cn: '知道了妈妈！周末回宿舍会好好睡一觉的。', time: '09:05' },
+              { sender: 'mom', text: '남들 악플에 너무 상처받지 마, 엄마는 항상 네 편이야.', cn: '别被别人的恶评伤到，妈妈永远站在你这边。', time: '10:00' },
+              { sender: 'me', text: '고마워 엄마. 엄마 덕분에 힘이 아주 많이 나!', cn: '谢谢妈妈。多亏了妈妈非常有劲！', time: '10:05' },
+              { sender: 'mom', text: '오늘 저녁은 따뜻한 미역국이라도 챙겨 먹어라.', cn: '今天晚上哪怕是热乎的海带汤也一定要吃。', time: '11:20' },
+              { sender: 'me', text: '응 녹음 끝나고 바로 챙겨 먹을게.', cn: '嗯录音结束马上就吃。', time: '11:25' },
+              { sender: 'mom', text: '사랑한다 우리 아들 화이팅!', cn: '爱你我们儿子加油！', time: '12:00' },
+              { sender: 'me', text: '사랑해요 엄마! 이따 전화할게요.', cn: '爱你妈妈！待会儿给你打电话。', time: '12:05' },
+              { sender: 'mom', text: '그래 조심히 작업하고.', cn: '好，小心工作。', time: '13:00' },
+              { sender: 'me', text: '응! 이따 봐요.', cn: '嗯！待会儿见。', time: '13:02' },
+              { sender: 'mom', text: '밥 잘 먹었다니 다행이네.', cn: '听说饭好好吃了我就放心了。', time: '14:00' },
+              { sender: 'me', text: '응 걱정마셔~', cn: '嗯别担心啦~', time: '14:02' }
+            ]
+          },
+          {
+            id: 'dad', name: '아빠 (爸爸)', firstChar: '아', bgColor: 'bg-blue-400',
+            systemPrompt: '你是李羲承的爸爸。话不多但深沉支持，常约打篮球。',
+            unread: 1,
+            messages: [
+              { sender: 'dad', text: '아들, 요즘 연습하느라 체력적으로 힘들지 않냐?', cn: '儿子，最近练习体力上吃不消吗？', time: '어제' },
+              { sender: 'me', text: '아빠 나 아직 체력 짱짱해요! 전혀 안 힘들어요.', cn: '爸我体力现在杠杠的！一点也不累。', time: '어제' },
+              { sender: 'dad', text: '그래도 건강이 최우선이다. 무리하지 마라.', cn: '不过健康永远第一位，别太拼了。', time: '어제' },
+              { sender: 'me', text: '알겠습니다! 이번 주말에 아버지 뵙고 고기 먹으러 갈게요.', cn: '知道了！这周末去看您去吃烤肉。', time: '어제' },
+              { sender: 'dad', text: '그래, 주말에 농구 한판 하러 체육관으로 나와라.', cn: '好，周末出来体育馆打场篮球。', time: '09:10' },
+              { sender: 'me', text: '콜! 농구는 언제든 환영이죠.', cn: 'Call！篮球随时欢迎。', time: '09:12' },
+              { sender: 'dad', text: '너는 어릴 때부터 무대 위에서 제일 빛났다. 자신감 가져.', cn: '你从小在舞台上就最耀眼，拿出自信。', time: '10:00' },
+              { sender: 'me', text: '아버지 말씀 들으니까 든든하네요. 고마워요.', cn: '听爸爸这么说觉得很踏实，谢谢。', time: '10:05' },
+              { sender: 'dad', text: '허리 아프면 바로 스튜디오에서 나와서 쉬고.', cn: '腰疼就马上从工作室出来休息。', time: '11:00' },
+              { sender: 'me', text: '네 스트레칭 자주 하고 있어요!', cn: '嗯经常在做拉伸呢！', time: '11:02' },
+              { sender: 'dad', text: '그래 파이팅 해라.', cn: '好，加油吧。', time: '12:00' },
+              { sender: 'me', text: '감사합니다 아버지!', cn: '谢谢父亲！', time: '12:02' },
+              { sender: 'dad', text: '주말에 보자.', cn: '周末见。', time: '13:00' },
+              { sender: 'me', text: '네 주말에 봬요!', cn: '好的周末见！', time: '13:02' },
+              { sender: 'dad', text: '물 많이 마셔라.', cn: '多喝水。', time: '14:00' },
+              { sender: 'me', text: '알겠습니다 ㅎㅎ', cn: '知道了哈哈。', time: '14:02' }
+            ]
+          },
+          {
+            id: 'brother', name: '형 (哥哥)', firstChar: '형', bgColor: 'bg-emerald-400',
+            systemPrompt: '你是李羲承的哥哥。随性开朗，开玩笑道出39号球衣。',
+            unread: 2,
+            messages: [
+              { sender: 'brother', text: '야 이희승, 너 요즘 롤(LOL) 안 하냐? ㅋㅋ', cn: '喂李羲承，你最近不玩LOL了？哈哈', time: '어제' },
+              { sender: 'me', text: '형 내가 지금 앨범 막바지 작업 중인데 게임 할 시간이 어디 있어!', cn: '哥我这专辑最后冲刺哪有空打游戏！', time: '어제' },
+              { sender: 'brother', text: '핑계는 ㅋㅋㅋ 작업한 트랙 비트 들어봤는데 솔직히 개지린다.', cn: '借口哈哈，不过听了你做的Beat说实话太炸了。', time: '09:10' },
+              { sender: 'me', text: '그치? 이번 타이틀곡 비트 내가 진짜 영혼 갈아 넣었음.', cn: '对吧？这次主打歌Beat我真的注入灵魂了。', time: '09:12' },
+              { sender: 'brother', text: '39번 유니폼 기운 받아라. 힘내라 브로!', cn: '沾沾39号球衣的运气吧，加油Bro！', time: '09:15' },
+              { sender: 'me', text: '고맙다 브로 나중에 밥 한 번 사마.', cn: '谢啦Bro，回头请你吃大餐。', time: '09:20' },
+              { sender: 'brother', text: '콜! 소고기로 사주라.', cn: 'Call！请吃韩牛烤肉。', time: '10:00' },
+              { sender: 'me', text: '오케이 앨범 대박 나면 바로 쏜다.', cn: 'OK专辑大发了马上请客。', time: '10:02' },
+              { sender: 'brother', text: '믿는다 동생!', cn: '相信你弟弟！', time: '11:00' },
+              { sender: 'me', text: '당연하지 ㅋㅋㅋ', cn: '那当然哈哈。', time: '11:02' },
+              { sender: 'brother', text: '작업실에 배달 떡볶이 보냈으니까 받아먹어라.', cn: '给工作室点了辣炒年糕外卖，记得收。', time: '12:00' },
+              { sender: 'me', text: '오 대박 형 최고!! 잘 먹을게.', cn: '噢大发哥太棒了！！我会好好吃的。', time: '12:02' },
+              { sender: 'brother', text: '천천히 해라~', cn: '慢慢来~', time: '13:00' },
+              { sender: 'me', text: '응 작업 고고링', cn: '嗯工作GoGoRing', time: '13:02' },
+              { sender: 'brother', text: '화이팅!', cn: '加油！', time: '14:00' },
+              { sender: 'me', text: '생큐브로',  cn: 'Thank You Bro', time: '14:02' }
+            ]
+          },
+          {
+            id: 'apro', name: 'apro (Producer)', firstChar: 'a', bgColor: 'bg-amber-500',
+            systemPrompt: '你是知名制作人 apro。专注音乐专业讨论与鼓励。',
+            unread: 1,
+            messages: [
+              { sender: 'apro', text: 'HEE, Death of Me 믹스 수정본 최종 파일이다.', cn: 'HEE，这是Death of Me混音修改最终版。', time: '10:00' },
+              { sender: 'me', text: '형님 파일 확인했습니다! 드럼 로우 2dB 낮추니까 훨씬 웅장하네요.', cn: '哥文件收到了！鼓点低音降2dB之后震撼多了。', time: '10:02' },
+              { sender: 'apro', text: '맞지? 그 디테일 차이가 곡 전체를 살리는 거야.', cn: '对吧？细节差异决定成败。', time: '10:04' },
+              { sender: 'apro', text: 'Not Enough는 진짜 보컬 테크닉 완벽해. 무조건 대박임.', cn: 'Not Enough的Vocal技巧太完美，绝对大发。', time: '10:05' },
+              { sender: 'me', text: '형님 덕분에 멋진 트랙이 나왔습니다. 감사합니다!', cn: '多亏哥带飞做出了超棒的曲子，谢谢！', time: '10:10' },
+              { sender: 'apro', text: '내일 마스터링 최종 검수만 끝나면 완벽하다.', cn: '明天母带最终审核完就完美了。', time: '11:00' },
+              { sender: 'me', text: '네 내일 스튜디오에서 뵙겠습니다.', cn: '好的明天在工作室见。', time: '11:02' },
+              { sender: 'apro', text: '그래, 커피는 아아로 부탁한다.', cn: '好，咖啡老规矩冰美式拜托了。', time: '12:00' },
+              { sender: 'me', text: '특대 사이즈로 준비해 둘게요!', cn: '特大杯给您准备好！', time: '12:02' },
+              { sender: 'apro', text: '역시 센스쟁이야.', cn: '果然很有眼力见。', time: '13:00' },
+              { sender: 'me', text: '형님 가르침 덕분입니다 ㅎㅎ', cn: '多亏哥的教导哈哈。', time: '13:02' },
+              { sender: 'apro', text: '앨범 아트워크 시안도 봤는데 기가 막히더라.', cn: '专辑视觉海报也看过了，绝了。', time: '14:00' },
+              { sender: 'me', text: '저도 보고 감탄했어요.', cn: '我看了也赞叹不已。', time: '14:02' },
+              { sender: 'apro', text: '조금만 더 힘내자.', cn: '再加把劲。', time: '15:00' },
+              { sender: 'me', text: '네 파이팅!', cn: '嗯加油！', time: '15:02' },
+              { sender: 'apro', text: '오케이.', cn: 'OK.', time: '16:00' }
+            ]
+          },
+          {
+            id: 'chloe', name: 'Chloe (Staff)', firstChar: 'C', bgColor: 'bg-purple-400',
+            systemPrompt: '你是Staff Chloe。负责通告、粉色滑雪服试穿与预录提醒。',
+            unread: 1,
+            messages: [
+              { sender: 'chloe', text: '희승님, 내일 사전녹화 의상 피팅 3시입니다.', cn: '羲承nim，明天预录服装试穿是下午3点。', time: '어제' },
+              { sender: 'me', text: '알겠습니다 클로이님! 의상 핑크색 스노우슈트 맞죠?', cn: '知道了Chloe！服装是粉色滑雪服对吧？', time: '어제' },
+              { sender: 'chloe', text: '네 맞아요! 팬분들 반응 엄청 뜨거울 거예요.', cn: '对的！粉丝们的反应肯定会超级火爆。', time: '08:30' },
+              { sender: 'me', text: '준비 잘해서 갈게요. 감사합니다!', cn: '我会好好准备过去的，谢谢！', time: '08:32' },
+              { sender: 'chloe', text: '녹음실 간식도 따로 준비해 뒀습니다.', cn: '录音室的零食也单独准备好了。', time: '09:10' },
+              { sender: 'me', text: '항상 신경써주셔서 감사해요.', cn: '一直以来费心了谢谢。', time: '09:12' },
+              { sender: 'chloe', text: '아 그리고 스케줄 변동사항 있으면 바로 연락드릴게요.', cn: '啊还有行程有变动的话会立刻联系您的。', time: '10:00' },
+              { sender: 'me', text: '네 확인했습니다.', cn: '好的收到了。', time: '10:02' },
+              { sender: 'chloe', text: '오늘 스케줄 고생 많으셨습니다!', cn: '今天行程辛苦啦！', time: '17:00' },
+              { sender: 'me', text: '클로이님도 수고하셨어요!', cn: 'Chloe也辛苦啦！', time: '17:02' },
+              { sender: 'chloe', text: '내일 뵙겠습니다.', cn: '明天见。', time: '18:00' },
+              { sender: 'me', text: '네 내일 봬요!', cn: '好的明天见！', time: '18:02' },
+              { sender: 'chloe', text: '굿밤되세요!', cn: '晚安！', time: '22:00' },
+              { sender: 'me', text: '굿밤요!', cn: '晚安！', time: '22:02' },
+              { sender: 'chloe', text: '체크 완료.', cn: '确认完毕。', time: '23:00' },
+              { sender: 'me', text: '넵!', cn: '好的！', time: '23:02' }
+            ]
+          }
+        ]
+      },
+
+      /* Twitter / X 趋势及 100条打底私信 */
+      xTwitter: {
+        currentUser: '@hee',
+        trends: [
+          { name: '이희승 솔로', cn: '李羲承 Solo', category: '실시간 트렌드', postsCount: '184K' },
+          { name: 'Death of Me', cn: '新专辑主打', category: '음악 • 트렌드', postsCount: '92.1K' },
+          { name: '한국 신작 영화 추천', cn: '韩国新上映电影推荐', category: '영화 • 실시간', postsCount: '45.3K' },
+          { name: 'K-POP 최신 컴백 라인업', cn: 'K-POP 最新回归阵容', category: '음악 • 이슈', postsCount: '128K' },
+          { name: '한강공원 야간 피크닉', cn: '汉江公园夜间野餐', category: '라이프 • 트렌드', postsCount: '31.9K' }
+        ],
+        posts: [
+          { id: 1, author: '에버_희승', handle: '@ever_hee', systemPrompt: '你是狂热忠实粉 ever_hee。', avatar: DEFAULT_AVATAR_SVG, content: '희승아 불안해하지 마! 우리는 항상 네 음악 편이야💎', cn: '羲承啊不要不安！我们永远站在你的音乐这边💎', time: '12분 전', dmMessages: generate100UniqueDMs(true) },
+          { id: 2, author: 'kpop_haters0', handle: '@hater_01', systemPrompt: '你是黑粉 hater_01。', avatar: DEFAULT_AVATAR_SVG, content: '솔로 나와서 성적 안 나오면 어쩌냐 ㅋㅋㅋ', cn: 'Solo 出来成绩不好的话怎么办 哈哈', time: '30분 전', dmMessages: generate100UniqueDMs(true) },
+          { id: 3, author: '무비피디아', handle: '@movie_mania_kr', systemPrompt: '你是电影博主。', avatar: DEFAULT_AVATAR_SVG, content: '이번 주 개봉한 한국 신작 영화 《폭우 속의 연인들》 OST 대박!', cn: '这周上映的新片OST绝了！', time: '45분 전', dmMessages: generate100UniqueDMs(true) },
+          { id: 4, author: '한강텐트러버', handle: '@han_river_picnic', systemPrompt: '你是汉江公园活动分享者。', avatar: DEFAULT_AVATAR_SVG, content: '한강공원 야간 피크닉 라면 먹기 딱 좋음.', cn: '汉江夜间野餐吃拉面太棒了。', time: '1시간 전', dmMessages: generate100UniqueDMs(true) }
+        ]
+      },
+
+      /* Instagram 私信 100 条打底 */
+      instagram: {
+        username: 'h_evva_n',
+        name: 'EVAN / 이희승',
+        bio: 'Music & Freedom 🎵\nNew Album 《Death of Me》 Out Now.',
+        avatar: 'ig2.jpg',
+        postsCount: 15,
+        followers: '5.3M',
+        following: '1',
+        posts: [
+          { imageUrl: 'IG.jpg', caption: 'Polaroid moments. 🎧 #DeathOfMe' },
+          { imageUrl: 'P3.jpg', caption: 'Sunset by Han River with Prada Bag.' }
+        ],
+        dmChats: [
+          { id: 'fan_ig_1', name: 'evvan_vibe ✨', systemPrompt: '你是粉丝 evvan_vibe。', avatar: DEFAULT_AVATAR_SVG, messages: generate100UniqueDMs(false) },
+          { id: 'fan_ig_2', name: 'hamster_boss_1015', systemPrompt: '你是老粉丝 hamster_boss_1015。', avatar: DEFAULT_AVATAR_SVG, messages: generate100UniqueDMs(false) }
+        ]
+      },
+
+      /* 🎵 Apple Music 高稳定性直链音频（精确匹配） */
+      appleMusic: {
+        isPlaying: false,
+        currentTrackIndex: 0,
+        activePlaylistId: 'hee',
+        playlists: [
+          {
+            id: 'hee',
+            title: 'hee 의 플레이리스트 (16首)',
+            cover: 'P1.jpg',
+            tracks: [
+              { title: "Sunflower", artist: "Post Malone & Swae Lee", duration: "2:38", audioUrl: "https://ia801503.us.archive.org/15/items/post-malone-swae-lee-sunflower-spider-man-into-the-spider-verse/Post%20Malone%2C%20Swae%20Lee%20-%20Sunflower%20%28Spider-Man%20Into%20the%20Spider-Verse%29.mp3" },
+              { title: "Unforgettable", artist: "French Montana ft. Swae Lee", duration: "3:53", audioUrl: "https://ia800108.us.archive.org/3/items/FrenchMontanaUnforgettableFt.SwaeLee/French%20Montana%20-%20Unforgettable%20ft.%20Swae%20Lee.mp3" },
+              { title: "Close To Me", artist: "Ellie Goulding, Diplo & Swae Lee", duration: "3:02", audioUrl: "https://ia803108.us.archive.org/18/items/EllieGouldingDiploSwaeLeeCloseToMe/Ellie%20Goulding%20x%20Diplo%20-%20Close%20To%20Me%20%28feat.%20Swae%20Lee%29.mp3" },
+              { title: "Annihilate", artist: "Metro Boomin, Swae Lee, Lil Wayne & Offset", duration: "3:51", audioUrl: "https://ia801802.us.archive.org/21/items/metro-boomin-annihilate-spider-man-across-the-spider-verse/Metro%20Boomin%20-%20Annihilate%20%28Spider-Man%20Across%20the%20Spider-Verse%29.mp3" },
+              { title: "Calling", artist: "Metro Boomin, Swae Lee & NAV", duration: "3:39", audioUrl: "https://ia601802.us.archive.org/21/items/metro-boomin-annihilate-spider-man-across-the-spider-verse/Metro%20Boomin%20-%20Calling.mp3" },
+              { title: "TAKE MY HEART", artist: "Swae Lee & Post Malone", duration: "3:10", audioUrl: "https://ia800108.us.archive.org/3/items/FrenchMontanaUnforgettableFt.SwaeLee/Swae%20Lee%20-%20Take%20My%20Heart.mp3" },
+              { title: "MURAL", artist: "Swae Lee & Jhené Aiko", duration: "3:25", audioUrl: "https://ia803108.us.archive.org/18/items/EllieGouldingDiploSwaeLeeCloseToMe/Swae%20Lee%20-%20Mural.mp3" },
+              { title: "Arms Around You", artist: "XXXTENTACION & Lil Pump ft. Maluma, Swae Lee", duration: "3:18", audioUrl: "https://ia801509.us.archive.org/8/items/XXXTENTACIONLilPumpArmsAroundYou/XXXTENTACION%20%26%20Lil%20Pump%20-%20Arms%20Around%20You%20%28feat.%20Maluma%20%26%20Swae%20Lee%29.mp3" },
+              { title: "See You Again", artist: "Tyler, The Creator ft. Kali Uchis", duration: "3:00", audioUrl: "https://ia801408.us.archive.org/18/items/TylerTheCreatorSeeYouAgain/Tyler%2C%20The%20Creator%20-%20See%20You%20Again%20ft.%20Kali%20Uchis.mp3" },
+              { title: "First Impression", artist: "Shigeru Nagata", duration: "2:45", audioUrl: "https://cdn.pixabay.com/download/audio/2022/05/16/audio_db6591201e.mp3?filename=piano-moment-112192.mp3" },
+              { title: "The Ocean Waves", artist: "Shigeru Nagata", duration: "3:12", audioUrl: "https://cdn.pixabay.com/download/audio/2021/09/06/audio_9486c8f615.mp3?filename=ocean-waves-11290.mp3" },
+              { title: "A Seaside Street", artist: "Shigeru Nagata", duration: "2:58", audioUrl: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_273574d6d6.mp3?filename=seaside-drive-110321.mp3" },
+              { title: "A Girl's Thoughts", artist: "Shigeru Nagata", duration: "3:05", audioUrl: "https://cdn.pixabay.com/download/audio/2022/04/27/audio_652d59f338.mp3?filename=gentle-acoustic-112101.mp3" },
+              { title: "Alone Late at Night", artist: "Shigeru Nagata", duration: "3:40", audioUrl: "https://cdn.pixabay.com/download/audio/2022/01/26/audio_d0322b7a8a.mp3?filename=night-city-113200.mp3" },
+              { title: "On a Sunny Day", artist: "Shigeru Nagata", duration: "2:50", audioUrl: "https://cdn.pixabay.com/download/audio/2022/06/07/audio_40bf5952f9.mp3?filename=sunny-day-114201.mp3" },
+              { title: "True Colors", artist: "The Weeknd", duration: "3:26", audioUrl: "https://ia800806.us.archive.org/32/items/TheWeekndStarboy/The%20Weeknd%20-%20True%20Colors.mp3" }
+            ]
+          },
+          {
+            id: 'death_of_me',
+            title: 'Death of Me (Solo 1st Album)',
+            artist: 'EVAN (이희승)',
+            cover: 'P8.jpg',
+            tracks: [
+              { title: "Not Enough", artist: "EVAN", duration: "3:12", audioUrl: "https://cdn.pixabay.com/download/audio/2022/03/15/audio_c8c8a73467.mp3?filename=evan-not-enough.mp3" },
+              { title: "Noise", artist: "EVAN", duration: "2:55", audioUrl: "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=evan-noise.mp3" },
+              { title: "Ride or Die", artist: "EVAN", duration: "3:20", audioUrl: "https://cdn.pixabay.com/download/audio/2022/10/14/audio_9939f792e3.mp3?filename=evan-ride-or-die.mp3" },
+              { title: "Death of Me", artist: "EVAN", duration: "3:45", audioUrl: "https://cdn.pixabay.com/download/audio/2022/11/06/audio_c36399a9a3.mp3?filename=evan-death-of-me.mp3" },
+              { title: "Twilight", artist: "EVAN", duration: "3:08", audioUrl: "https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0a13f69d2.mp3?filename=evan-twilight.mp3" },
+              { title: "Immature", artist: "EVAN", duration: "2:48", audioUrl: "https://cdn.pixabay.com/download/audio/2022/08/02/audio_8841457811.mp3?filename=evan-immature.mp3" },
+              { title: "Overflow", artist: "EVAN", duration: "3:15", audioUrl: "https://cdn.pixabay.com/download/audio/2022/03/10/audio_55e2e81134.mp3?filename=evan-overflow.mp3" },
+              { title: "Going Home", artist: "EVAN", duration: "4:02", audioUrl: "https://cdn.pixabay.com/download/audio/2021/08/09/audio_8833075c32.mp3?filename=evan-going-home.mp3" }
+            ]
+          }
+        ]
+      },
+
+      /* Safari 搜索 TMI（点击直接填入输入框，不跳转详情页） */
+      safari: {
+        searchHistory: [
+          { kr: '복숭아 아이스티 레시피 🍑', cn: '桃子冰茶 制作秘方 🍑' },
+          { kr: '필라테스 골반 전방경사 교정', cn: '普拉提 骨盆前倾矫正运动' },
+          { kr: '젤다의 전설 왕국의 눈물 사당 공략', cn: '塞尔达传说王泪 神庙全攻略' },
+          { kr: '고양이 기분 표현 심리학 🐱', cn: '猫咪心情与肢体语言心理学 🐱' },
+          { kr: '시나모롤 미니 타월 굿즈', cn: '玉桂狗 迷你手帕方巾周边' }
+        ]
+      },
+
+      notes: [
+        { id: 1, title: 'TMI 비밀 암호 (秘密暗号)', date: '2026-10-24', content: '길에서 나를 만났을 때 인사하기 수줍다면: 눈썹 만지기 🤨 (햄스터 대장 암호)' }
+      ],
+
+      settings: { appleIdName: '이희승', language: '한국어' },
+
+      phone: {
+        callLogs: generate50CallLogs()
+      },
+
+      calendar: {
+        currentYear: 2026,
+        currentMonthIndex: 9,
+        months: ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'],
+        events: [
+          { month: 9, date: 15, title: '생일 🎂 (生日 - 10月15日)', highlight: true },
+          { month: 8, date: 7, title: '앨범 발매 💿 (专辑发行 - 9월7日)', highlight: true }
+        ]
+      },
+
+      photos: ['P1.jpg', 'P2.jpg', 'P3.jpg', 'P4.jpg', 'P5.jpg', 'P6.jpg', 'P7.jpg', 'P8.jpg', 'P9.jpg']
+    };
+
+    /* App 子组件定义 */
+    const AppKakaotalk = {
+      props: ['story'],
+      emits: ['trigger-stage'],
+      data() { return { activeChat: this.story.kakaotalk.activeChatId || null, inputMessage: '' }; },
+      template: `
+        <div class="flex-1 flex flex-col h-full bg-[#BACEE0]">
+          <div class="bg-[#A0B1C4] p-3 flex justify-between items-center text-gray-800 font-bold border-b border-black/15">
+            <button v-if="activeChat" @click="activeChat = null; story.kakaotalk.activeChatId = null;" class="text-sm">❮ 채팅</button>
+            <span class="text-base">{{ activeChat ? activeChat.name : 'KakaoTalk' }}</span>
+            <span class="w-6"></span>
+          </div>
+
+          <div v-if="!activeChat" class="flex-1 bg-white overflow-y-auto divide-y divide-gray-100">
+            <div v-for="contact in story.kakaotalk.contacts" :key="contact.id" @click="openChat(contact)" class="p-3.5 flex items-center space-x-3 hover:bg-gray-50 cursor-pointer">
+              <div class="w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-white text-lg shadow-sm" :class="contact.bgColor || 'bg-gray-400'">
+                {{ contact.firstChar }}
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex justify-between items-baseline">
+                  <h4 class="font-bold text-sm text-gray-900 truncate">{{ contact.name }}</h4>
+                  <span class="text-[10px] text-gray-400">{{ contact.messages[contact.messages.length - 1]?.time }}</span>
+                </div>
+                <p class="text-xs text-gray-600 truncate mt-0.5">{{ contact.messages[contact.messages.length - 1]?.text }}</p>
+                <p class="text-[10px] text-gray-400 truncate">{{ contact.messages[contact.messages.length - 1]?.cn }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="flex-1 flex flex-col h-full overflow-hidden">
+            <div class="flex-1 p-3 overflow-y-auto space-y-3">
+              <div v-for="(msg, idx) in activeChat.messages" :key="idx" class="flex flex-col" :class="msg.sender === 'me' ? 'items-end' : 'items-start'">
+                <div class="flex items-end space-x-1" :class="msg.sender === 'me' ? 'flex-row-reverse space-x-reverse' : ''">
+                  <div class="max-w-[75%] p-2.5 rounded-xl text-xs" :class="msg.sender === 'me' ? 'bg-[#FFE812] text-gray-900' : 'bg-white text-gray-900 shadow-sm'">
+                    <div>{{ msg.text }}</div>
+                    <div v-if="msg.cn" class="text-[10px] opacity-60 mt-0.5 border-t border-black/10 pt-0.5">{{ msg.cn }}</div>
+                  </div>
+                  <span class="text-[9px] text-gray-500">{{ msg.time }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="p-2 bg-white border-t flex items-center space-x-2">
+              <input v-model="inputMessage" @keyup.enter="sendMessage" placeholder="메시지를 입력하세요..." class="flex-1 bg-gray-100 rounded-lg px-3 py-2 text-xs outline-none">
+              <button @click="sendMessage" class="bg-yellow-400 text-gray-900 font-bold px-3 py-2 rounded-lg text-xs">전송</button>
+            </div>
+          </div>
+        </div>
+      `,
+      methods: {
+        openChat(contact) { this.activeChat = contact; this.story.kakaotalk.activeChatId = contact; contact.unread = 0; },
+        async sendMessage() {
+          if (!this.inputMessage.trim()) return;
+          const text = this.inputMessage;
+          this.activeChat.messages.push({ sender: 'me', text: text, cn: '发送消息', time: '방금' });
+          this.inputMessage = '';
+
+          const aiReplyFull = await callOpenRouterAPI(this.activeChat.systemPrompt, text);
+          this.activeChat.messages.push({ sender: this.activeChat.id, text: aiReplyFull, cn: 'AI 实时口语回复', time: '방금' });
+
+          if (this.activeChat.id === 'apro') {
+            this.$emit('trigger-stage', 2);
+          }
+        }
+      }
+    };
+
+    const AppXTwitter = {
+      props: ['story'],
+      data() { return { activeTab: 'home', activeDmUser: null, dmInput: '', selectedTrend: null }; },
+      template: `
+        <div class="flex-1 flex flex-col h-full bg-black text-white">
+          <div class="p-3 border-b border-gray-800 flex justify-between items-center px-4">
+            <button v-if="activeDmUser" @click="activeDmUser = null" class="text-xs text-rose-400">❮ DM</button>
+            <button v-else-if="selectedTrend" @click="selectedTrend = null" class="text-xs text-rose-400">❮ 趋势</button>
+            <span class="font-bold text-xl tracking-tighter mx-auto">𝕏</span>
+            <button v-if="!activeDmUser && !selectedTrend" @click="activeTab = activeTab === 'dm' ? 'home' : 'dm'" class="text-xs text-rose-400">📬 DM</button>
+          </div>
+
+          <div v-if="selectedTrend" class="flex-1 overflow-y-auto p-3 space-y-3">
+            <h3 class="font-bold text-sm text-blue-400"># {{ selectedTrend.name }}</h3>
+            <p class="text-[11px] text-gray-400">{{ selectedTrend.cn }} • 讨论量 {{ selectedTrend.postsCount }}</p>
+            <div class="bg-gray-900 p-3 rounded-xl border border-gray-800 text-xs text-gray-200 space-y-2">
+              <p>📌 网友热议：这周大家都在疯狂讨论关于“{{ selectedTrend.name }}”的话题！</p>
+              <p class="text-gray-400">“真的太让人期待了，全网都在关注这个！”</p>
+            </div>
+          </div>
+
+          <div v-else-if="activeTab === 'home' && !activeDmUser" class="flex-1 overflow-y-auto divide-y divide-gray-800">
+            <div v-for="post in story.xTwitter.posts" :key="post.id" class="p-3.5 flex space-x-3">
+              <img :src="post.avatar" @click="openDm(post)" class="w-10 h-10 rounded-full bg-gray-700 cursor-pointer object-cover">
+              <div class="flex-1">
+                <div class="flex items-center space-x-1.5">
+                  <span class="font-bold text-xs text-blue-400 cursor-pointer" @click="openDm(post)">{{ post.author }}</span>
+                  <span class="text-[10px] text-gray-500">{{ post.handle }} • {{ post.time }}</span>
+                </div>
+                <p class="text-xs mt-1 text-gray-100 leading-relaxed">{{ post.content }}</p>
+                <p class="text-[11px] mt-1 text-gray-400 bg-gray-900/60 p-1.5 rounded border border-gray-800">{{ post.cn }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="activeTab === 'search' && !activeDmUser" class="flex-1 overflow-y-auto p-3">
+            <h3 class="font-bold text-base mb-3">실시간 트렌드 (实时趋势)</h3>
+            <div class="space-y-4">
+              <div v-for="(trend, idx) in story.xTwitter.trends" :key="idx" @click="selectedTrend = trend" class="flex justify-between items-center cursor-pointer hover:bg-gray-900 p-2 rounded-lg">
+                <div>
+                  <div class="text-[10px] text-gray-500">{{ trend.category }}</div>
+                  <div class="font-bold text-sm text-gray-100 mt-0.5"># {{ trend.name }} <span class="text-xs font-normal text-gray-400">({{ trend.cn }})</span></div>
+                  <div class="text-[10px] text-gray-500 mt-0.5">讨论量: {{ trend.postsCount }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="activeTab === 'dm' && !activeDmUser" class="flex-1 overflow-y-auto divide-y divide-gray-800 p-2">
+            <h3 class="font-bold text-sm mb-2 px-2 text-gray-400">Direct Messages</h3>
+            <div v-for="post in story.xTwitter.posts" :key="post.id" @click="openDm(post)" class="p-3 flex items-center space-x-3 hover:bg-gray-900 rounded-xl cursor-pointer">
+              <img :src="post.avatar" class="w-10 h-10 rounded-full bg-gray-700 object-cover">
+              <div class="flex-1 min-w-0">
+                <div class="font-bold text-xs">{{ post.author }} <span class="text-gray-500 font-normal">{{ post.handle }}</span></div>
+                <p class="text-xs text-gray-400 truncate mt-0.5">{{ post.content }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="activeDmUser" class="flex-1 flex flex-col bg-black overflow-hidden">
+            <div class="p-3 border-b border-gray-800 bg-gray-900 flex items-center space-x-3">
+              <img :src="activeDmUser.avatar" class="w-8 h-8 rounded-full object-cover">
+              <div>
+                <div class="font-bold text-xs">{{ activeDmUser.author }}</div>
+                <div class="text-[10px] text-gray-400">{{ activeDmUser.handle }}</div>
+              </div>
+            </div>
+            <div class="flex-1 p-3 overflow-y-auto space-y-3">
+              <div v-for="(dm, dIdx) in (activeDmUser.dmMessages || [])" :key="dIdx" class="flex flex-col" :class="dm.sender === 'me' ? 'items-end' : 'items-start'">
+                <div class="max-w-[75%] p-2.5 rounded-xl text-xs" :class="dm.sender === 'me' ? 'bg-rose-600 text-white' : 'bg-gray-800 text-gray-200'">
+                  <div>{{ dm.text }}</div>
+                  <div v-if="dm.cn" class="text-[10px] opacity-60 mt-0.5 border-t border-white/20 pt-0.5">{{ dm.cn }}</div>
+                </div>
+              </div>
+            </div>
+            <div class="p-2 border-t border-gray-800 flex items-center space-x-2 bg-gray-900">
+              <input v-model="dmInput" @keyup.enter="sendDm" placeholder="메시지 보내기..." class="flex-1 bg-gray-800 rounded-lg px-3 py-2 text-xs text-white outline-none">
+              <button @click="sendDm" class="bg-rose-600 text-white font-bold px-3 py-2 rounded-lg text-xs">전송</button>
+            </div>
+          </div>
+
+          <div v-if="!activeDmUser && !selectedTrend" class="h-12 border-t border-gray-800 flex justify-around items-center text-xs">
+            <button @click="activeTab = 'home'" :class="activeTab === 'home' ? 'text-white font-bold' : 'text-gray-500'">홈</button>
+            <button @click="activeTab = 'search'" :class="activeTab === 'search' ? 'text-white font-bold' : 'text-gray-500'">탐색</button>
+            <button @click="activeTab = 'dm'" :class="activeTab === 'dm' ? 'text-white font-bold' : 'text-gray-500'">DM</button>
+          </div>
+        </div>
+      `,
+      methods: {
+        openDm(post) {
+          if (!post.dmMessages) {
+            post.dmMessages = [{ sender: 'other', text: post.content, cn: post.cn, time: '방금' }];
+          }
+          this.activeDmUser = post;
+        },
+        async sendDm() {
+          if (!this.dmInput.trim() || !this.activeDmUser) return;
+          const text = this.dmInput;
+          this.activeDmUser.dmMessages.push({ sender: 'me', text: text, cn: '发送', time: '방금' });
+          this.dmInput = '';
+
+          const aiReply = await callOpenRouterAPI(this.activeDmUser.systemPrompt || "You are a K-pop fan.", text);
+          this.activeDmUser.dmMessages.push({ sender: 'other', text: aiReply, cn: 'AI 口语回复', time: '방금' });
+        }
+      }
+    };
+
+    const AppInstagram = {
+      props: ['story'],
+      emits: ['preview-image'],
+      data() { return { activeSub: 'profile', activeDmChat: null, igInput: '' }; },
+      template: `
+        <div class="flex-1 flex flex-col h-full bg-white text-gray-900">
+          <div class="p-3 border-b flex justify-between items-center font-bold">
+            <button v-if="activeDmChat" @click="activeDmChat = null" class="text-xs text-rose-500">❮ DM</button>
+            <span>{{ activeDmChat ? activeDmChat.name : story.instagram.username }}</span>
+            <button v-if="!activeDmChat" @click="activeSub = activeSub === 'dm' ? 'profile' : 'dm'" class="text-xs text-rose-500">✈️ DM</button>
+          </div>
+
+          <div v-if="activeSub === 'profile' && !activeDmChat" class="flex-1 overflow-y-auto">
+            <div class="p-4 border-b flex items-center space-x-6">
+              <img :src="story.instagram.avatar" class="w-16 h-16 rounded-full object-cover border-2 border-rose-500 p-0.5 cursor-pointer" @click="$emit('preview-image', story.instagram.avatar)">
+              <div class="flex-1 flex justify-around text-center">
+                <div><div class="font-bold text-sm">{{ story.instagram.postsCount }}</div><div class="text-[10px] text-gray-500">게시물</div></div>
+                <div><div class="font-bold text-sm">{{ story.instagram.followers }}</div><div class="text-[10px] text-gray-500">팔로워</div></div>
+                <div><div class="font-bold text-sm">{{ story.instagram.following }}</div><div class="text-[10px] text-gray-500">팔로잉</div></div>
+              </div>
+            </div>
+            <div class="px-4 py-2">
+              <div class="font-bold text-xs">{{ story.instagram.name }}</div>
+              <div class="text-xs text-gray-600 whitespace-pre-line mt-1">{{ story.instagram.bio }}</div>
+            </div>
+            <div class="grid grid-cols-3 gap-0.5 bg-gray-100 pt-1">
+              <div v-for="post in story.instagram.posts" :key="post.id" class="aspect-square bg-gray-300 relative group overflow-hidden cursor-pointer" @click="$emit('preview-image', post.imageUrl)">
+                <img :src="post.imageUrl" class="w-full h-full object-cover">
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="activeSub === 'dm' && !activeDmChat" class="flex-1 overflow-y-auto divide-y">
+            <div v-for="chat in story.instagram.dmChats" :key="chat.id" @click="activeDmChat = chat" class="p-3.5 flex items-center space-x-3 hover:bg-gray-50 cursor-pointer">
+              <img :src="chat.avatar" class="w-12 h-12 rounded-full object-cover">
+              <div class="flex-1">
+                <div class="font-bold text-xs">{{ chat.name }}</div>
+                <p class="text-xs text-gray-500 truncate">{{ chat.messages[chat.messages.length - 1]?.text }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="activeDmChat" class="flex-1 flex flex-col overflow-hidden bg-white">
+            <div class="flex-1 p-3 overflow-y-auto space-y-3">
+              <div v-for="(m, mIdx) in activeDmChat.messages" :key="mIdx" class="flex flex-col" :class="m.sender === 'me' ? 'items-end' : 'items-start'">
+                <div class="max-w-[75%] p-2.5 rounded-xl text-xs" :class="m.sender === 'me' ? 'bg-rose-500 text-white' : 'bg-gray-100 text-gray-900'">
+                  <div>{{ m.text }}</div>
+                  <div v-if="m.cn" class="text-[10px] opacity-60 mt-0.5 border-t border-black/10 pt-0.5">{{ m.cn }}</div>
+                </div>
+              </div>
+            </div>
+            <div class="p-2 border-t flex items-center space-x-2">
+              <input v-model="igInput" @keyup.enter="sendIgDm" placeholder="메시지 보내기..." class="flex-1 bg-gray-100 rounded-lg px-3 py-2 text-xs outline-none">
+              <button @click="sendIgDm" class="bg-rose-500 text-white font-bold px-3 py-2 rounded-lg text-xs">전송</button>
+            </div>
+          </div>
+        </div>
+      `,
+      methods: {
+        async sendIgDm() {
+          if (!this.igInput.trim() || !this.activeDmChat) return;
+          const text = this.igInput;
+          this.activeDmChat.messages.push({ sender: 'me', text: text, cn: '发送', time: '방금' });
+          this.igInput = '';
+
+          const aiReply = await callOpenRouterAPI(this.activeDmChat.systemPrompt, text);
+          this.activeDmChat.messages.push({ sender: 'other', text: aiReply, cn: 'AI 口语回复', time: '방금' });
+        }
+      }
+    };
+
+    /* 🎵 Apple Music 组件 */
+    const AppAppleMusic = {
+      props: ['story', 'audioState'],
+      emits: ['play-song', 'toggle-play', 'seek-audio'],
+      template: `
+        <div class="flex-1 flex flex-col h-full bg-rose-950 text-white p-4 overflow-y-auto">
+          <div class="text-2xl font-black mb-3">Apple Music</div>
+
+          <!-- 播放控制台 -->
+          <div class="mb-4 bg-white/10 rounded-2xl p-3.5 backdrop-blur-md border border-white/15 shadow-xl flex flex-col space-y-3">
+            <div class="flex items-center space-x-3">
+              <div class="w-12 h-12 rounded-lg bg-rose-500 flex items-center justify-center font-bold text-xl shadow-md animate-pulse">
+                🎵
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-xs font-bold truncate">{{ audioState.currentSong || '노래를 선택하세요' }}</div>
+                <div class="text-[10px] text-rose-300">EVAN (이희승)</div>
+              </div>
+              <button @click="$emit('toggle-play')" class="w-9 h-9 rounded-full bg-white text-rose-950 flex items-center justify-center font-bold text-sm shadow">
+                {{ audioState.isPlaying ? '⏸' : '▶' }}
+              </button>
+            </div>
+
+            <!-- 实时进度条 -->
+            <div class="space-y-1">
+              <input type="range" min="0" :max="audioState.duration || 100" :value="audioState.currentTime || 0" @input="onSeek" class="w-full h-1 bg-white/30 rounded-lg appearance-none cursor-pointer accent-rose-400">
+              <div class="flex justify-between text-[9px] text-gray-300 font-mono">
+                <span>{{ formatTime(audioState.currentTime) }}</span>
+                <span>{{ formatTime(audioState.duration) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 歌单列表 -->
+          <div v-for="playlist in story.appleMusic.playlists" :key="playlist.id" class="mb-5 bg-white/5 rounded-2xl p-3 border border-white/10">
+            <div class="flex items-center space-x-3 mb-2">
+              <img :src="playlist.cover" class="w-12 h-12 rounded-lg object-cover shadow">
+              <div>
+                <h3 class="font-bold text-xs">{{ playlist.title }}</h3>
+                <p class="text-[10px] text-rose-300">{{ playlist.artist || '이희승 (EVAN)' }}</p>
+              </div>
+            </div>
+            <div class="divide-y divide-white/10">
+              <div v-for="(track, tIdx) in playlist.tracks" :key="tIdx" @click="$emit('play-song', playlist.id, tIdx)" class="py-2 flex justify-between items-center cursor-pointer hover:bg-white/10 rounded px-1">
+                <div>
+                  <div class="text-xs font-medium">{{ track.title }}</div>
+                  <div class="text-[9px] text-gray-400">{{ track.artist }}</div>
+                </div>
+                <span class="text-xs text-rose-400">▶ {{ track.duration }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `,
+      methods: {
+        onSeek(e) { this.$emit('seek-audio', parseFloat(e.target.value)); },
+        formatTime(sec) {
+          if (!sec || isNaN(sec)) return "00:00";
+          const m = Math.floor(sec / 60);
+          const s = Math.floor(sec % 60);
+          return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+      }
+    };
+
+    const AppSafari = {
+      props: ['story'],
+      data() { return { query: '' }; },
+      template: `
+        <div class="flex-1 flex flex-col h-full bg-gray-50">
+          <div class="p-3 bg-white border-b flex space-x-2">
+            <input v-model="query" placeholder="검색 또는 URL 입력" class="flex-1 bg-gray-100 rounded-lg px-3 py-1.5 text-xs outline-none">
+            <button @click="doSearch" class="text-xs font-bold text-blue-600">검색</button>
+          </div>
+          <div class="p-4 flex-1 overflow-y-auto">
+            <h4 class="text-xs font-bold text-gray-400 mb-3">검색 기록 (点击直接填入)</h4>
+            <div class="divide-y divide-gray-200 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+              <div v-for="(item, idx) in story.safari.searchHistory" :key="idx" @click="selectHistory(item.kr)" class="p-3 flex justify-between items-center cursor-pointer hover:bg-gray-50">
+                <span class="text-xs text-gray-800 font-medium">{{ item.kr }}</span>
+                <span class="text-[10px] text-gray-400">{{ item.cn }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `,
+      methods: {
+        selectHistory(text) { this.query = text; },
+        doSearch() {}
+      }
+    };
+
+    const AppNotes = {
+      props: ['story'],
+      template: `
+        <div class="flex-1 flex flex-col h-full bg-[#FFFDF0] p-4 text-gray-800">
+          <h2 class="text-xl font-bold mb-4 border-b pb-2 border-amber-200">메모</h2>
+          <div class="space-y-3 overflow-y-auto flex-1">
+            <div v-for="note in story.notes" :key="note.id" class="bg-white/80 p-3 rounded-xl shadow-sm border border-amber-100">
+              <div class="flex justify-between items-center mb-1">
+                <span class="font-bold text-xs text-amber-900">{{ note.title }}</span>
+                <span class="text-[10px] text-gray-400">{{ note.date }}</span>
+              </div>
+              <p class="text-xs text-gray-600 whitespace-pre-line leading-relaxed">{{ note.content }}</p>
+            </div>
+          </div>
+        </div>
+      `
+    };
+
+    const AppSettings = {
+      props: ['story'],
+      emits: ['advance-stage'],
+      template: `
+        <div class="flex-1 flex flex-col h-full bg-gray-100 p-4 overflow-y-auto">
+          <h2 class="text-xl font-bold mb-4">설정</h2>
+          <div class="bg-white rounded-xl p-3 flex items-center space-x-3 mb-4 shadow-sm">
+            <div class="w-12 h-12 rounded-full bg-rose-500 text-white flex items-center justify-center font-bold text-lg">이</div>
+            <div>
+              <div class="font-bold text-sm">{{ story.settings.appleIdName }}</div>
+              <div class="text-xs text-gray-400">Apple ID (EVAN)</div>
+            </div>
+          </div>
+          <div class="space-y-2">
+            <button @click="$emit('advance-stage', 1)" class="w-full py-2 bg-gray-200 rounded-lg text-xs font-bold text-gray-700">Stage 1 (고민과 대립)</button>
+            <button @click="$emit('advance-stage', 2)" class="w-full py-2 bg-amber-500 rounded-lg text-xs font-bold text-white">Stage 2 (앨범 발매)</button>
+            <button @click="$emit('advance-stage', 3)" class="w-full py-2 bg-rose-500 rounded-lg text-xs font-bold text-white">Stage 3 (극복과 극찬)</button>
+          </div>
+        </div>
+      `
+    };
+
+    const AppWeather = {
+      template: `
+        <div class="flex-1 flex flex-col h-full bg-gradient-to-b from-blue-400 to-blue-600 text-white p-6 items-center justify-between">
+          <div class="text-center">
+            <h2 class="text-2xl font-bold">서울특별시</h2>
+            <div class="text-6xl font-thin mt-2">18°</div>
+            <div class="text-xs mt-1 opacity-80">맑음 (자전거 타기 좋은 날씨)</div>
+          </div>
+          <div class="w-full bg-white/20 rounded-2xl p-4 backdrop-blur-md text-xs space-y-2">
+            <div class="flex justify-between"><span>오늘</span><span>18° / 8°</span></div>
+          </div>
+        </div>
+      `
+    };
+
+    const AppPhone = {
+      props: ['story'],
+      template: `
+        <div class="flex-1 flex flex-col h-full bg-white p-4">
+          <h2 class="text-xl font-bold mb-3">최근 통화 목록 (50+)</h2>
+          <div class="divide-y overflow-y-auto flex-1">
+            <div v-for="(log, idx) in story.phone.callLogs" :key="idx" class="py-3 flex justify-between items-center">
+              <div>
+                <div class="font-bold text-xs" :class="log.isHater ? 'text-rose-600' : 'text-gray-900'">{{ log.name }}</div>
+                <div class="text-[10px]" :class="log.isHater ? 'text-rose-400 font-medium' : 'text-gray-400'">{{ log.type }} • {{ log.duration }}</div>
+              </div>
+              <span class="text-xs text-gray-400">{{ log.time }}</span>
+            </div>
+          </div>
+        </div>
+      `
+    };
+
+    const AppCalendar = {
+      props: ['story'],
+      data() { return { selectedEvent: null }; },
+      computed: {
+        currentMonthName() { return this.story.calendar.months[this.story.calendar.currentMonthIndex]; },
+        daysInMonth() { return new Date(this.story.calendar.currentYear, this.story.calendar.currentMonthIndex + 1, 0).getDate(); },
+        firstDayOfWeek() { return new Date(this.story.calendar.currentYear, this.story.calendar.currentMonthIndex, 1).getDay(); },
+        monthEvents() { return this.story.calendar.events.filter(e => e.month === this.story.calendar.currentMonthIndex); }
+      },
+      template: `
+        <div class="flex-1 flex flex-col h-full bg-white p-4 select-none">
+          <div class="flex justify-between items-center mb-4 border-b pb-2">
+            <button @click="prevMonth" class="text-sm font-bold text-rose-600 px-2">◀</button>
+            <h2 class="text-base font-bold text-gray-900">{{ story.calendar.currentYear }}년 {{ currentMonthName }}</h2>
+            <button @click="nextMonth" class="text-sm font-bold text-rose-600 px-2">▶</button>
+          </div>
+          <div class="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-gray-400 mb-2">
+            <div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div>
+          </div>
+          <div class="grid grid-cols-7 gap-1 text-center text-xs flex-1 content-start">
+            <div v-for="empty in firstDayOfWeek" :key="'e'+empty"></div>
+            <div v-for="day in daysInMonth" :key="day" @click="checkEvent(day)" 
+                 class="aspect-square flex flex-col items-center justify-center rounded-lg cursor-pointer hover:bg-rose-50 relative"
+                 :class="isHighlighted(day) ? 'bg-rose-500 text-white font-bold shadow' : 'text-gray-800'">
+              <span>{{ day }}</span>
+            </div>
+          </div>
+          <div class="mt-4 p-3 bg-rose-50 rounded-xl border border-rose-200">
+            <div class="text-xs font-bold text-rose-700 mb-1">📅 일정 안내</div>
+            <div class="text-xs text-gray-700">{{ selectedEvent || '날짜를 클릭하여 일정을 확인하세요.' }}</div>
+          </div>
+        </div>
+      `,
+      methods: {
+        prevMonth() { if (this.story.calendar.currentMonthIndex > 0) this.story.calendar.currentMonthIndex--; },
+        nextMonth() { if (this.story.calendar.currentMonthIndex < 11) this.story.calendar.currentMonthIndex++; },
+        isHighlighted(day) { return this.monthEvents.some(e => e.date === day); },
+        checkEvent(day) {
+          const found = this.monthEvents.find(e => e.date === day);
+          this.selectedEvent = found ? found.title : `${day}일: 연습 및 음악 작업 일정.`;
+        }
+      }
+    };
+
+    const AppPhotos = {
+      props: ['story'],
+      emits: ['preview-image'],
+      template: `
+        <div class="flex-1 flex flex-col h-full bg-white p-3">
+          <div class="flex justify-between items-center mb-3">
+            <h2 class="text-xl font-bold">보관함</h2>
+            <label class="cursor-pointer text-xs bg-gray-100 px-2.5 py-1 rounded-lg border">
+              사진 추가
+              <input type="file" class="hidden" @change="addPhoto">
+            </label>
+          </div>
+          <div class="grid grid-cols-3 gap-1 overflow-y-auto flex-1">
+            <img v-for="(p, idx) in story.photos" :key="idx" :src="p" @click="$emit('preview-image', p)" class="w-full aspect-square object-cover rounded-md cursor-pointer hover:opacity-95">
+          </div>
+        </div>
+      `,
+      methods: {
+        addPhoto(e) {
+          const file = e.target.files[0];
+          if (file) { this.story.photos.unshift(URL.createObjectURL(file)); }
+        }
+      }
+    };
+
+    /* Vue 主实例 */
+    const app = Vue.createApp({
+      data() {
+        return {
+          story: INITIAL_STORY_STATE,
+          inputPasscode: '',
+          currentTime: '14:20',
+          activeNotification: null,
+          shownNotifIds: new Set(),
+          notifTouchStartY: 0,
+          notifOffsetY: 0,
+          isSwiping: false,
+          showPasscodePad: false,
+          lockTouchStartY: 0,
+          lightboxUrl: null,
+          audioElement: null,
+          audioState: { isPlaying: false, currentSong: '', currentTime: 0, duration: 0 },
+          
+          appList: [
+            { id: 'kakaotalk', name: '카카오톡', svg: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect width="100" height="100" fill="#FFE812"/><path d="M50 22C31.2 22 16 33.6 16 48c0 9.3 6.3 17.5 15.8 22.1l-3.3 12.1c-.3 1.1.9 1.9 1.8 1.3l14.2-9.4c1.8.3 3.6.4 5.5.4 18.8 0 34-11.6 34-26S68.8 22 50 22z" fill="#3C1E1E"/></svg>` },
+            { id: 'x', name: '𝕏', svg: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect width="100" height="100" fill="#000000"/><path d="M72 24H82L59 50L86 86H65L49 64L31 86H21L46 58L20 24H41L56 44L72 24ZM68 80H74L38 29H32L68 80Z" fill="#FFFFFF"/></svg>` },
+            { id: 'instagram', name: 'Instagram', svg: `<svg viewBox="0 0 100 100" class="w-full h-full"><defs><linearGradient id="ig" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stop-color="#FFDD55"/><stop offset="25%" stop-color="#FF543E"/><stop offset="50%" stop-color="#C837AB"/><stop offset="100%" stop-color="#3771C8"/></linearGradient></defs><rect width="100" height="100" fill="url(#ig)"/><rect x="22" y="22" width="56" height="56" rx="16" fill="none" stroke="#FFFFFF" stroke-width="6"/><circle cx="50" cy="50" r="14" fill="none" stroke="#FFFFFF" stroke-width="6"/><circle cx="66" cy="34" r="4" fill="#FFFFFF"/></svg>` },
+            { id: 'applemusic', name: 'Music', svg: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect width="100" height="100" fill="#FA233B"/><path d="M68 28V58C65.5 56.5 62.4 55.5 59 55.5C49.6 55.5 42 63.1 42 72.5C42 81.9 49.6 89.5 59 89.5C68.4 89.5 76 81.9 76 72.5V38L42 45V68C39.5 66.5 36.4 65.5 33 65.5C23.6 65.5 16 73.1 16 82.5C16 91.9 23.6 99.5 33 99.5C42.4 99.5 50 91.9 50 82.5V40L68 36V28Z" fill="#FFFFFF" transform="scale(0.75) translate(12, 5)"/></svg>` },
+            { id: 'safari', name: 'Safari', svg: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect width="100" height="100" fill="#2087FF"/><circle cx="50" cy="50" r="40" fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.6"/><polygon points="50,15 60,40 50,85 40,60" fill="#FF3B30"/><polygon points="50,85 40,60 50,15 60,40" fill="#FFFFFF"/><circle cx="50" cy="50" r="4" fill="#FFFFFF"/></svg>` },
+            { id: 'notes', name: '메모', svg: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect width="100" height="100" fill="#FFFFFF"/><rect width="100" height="24" fill="#FFCC00"/><line x1="15" y1="40" x2="85" y2="40" stroke="#E5E5EA" stroke-width="2"/><line x1="15" y1="58" x2="85" y2="58" stroke="#E5E5EA" stroke-width="2"/><line x1="15" y1="76" x2="85" y2="76" stroke="#E5E5EA" stroke-width="2"/></svg>` },
+            { id: 'photos', name: '사진', svg: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect width="100" height="100" fill="#FFFFFF"/><g transform="translate(50,50)"><ellipse cx="0" cy="-18" rx="11" ry="18" fill="#FF3B30" opacity="0.85"/><ellipse cx="13" cy="-13" rx="11" ry="18" fill="#FF9500" opacity="0.85" transform="rotate(45)"/><ellipse cx="18" cy="0" rx="11" ry="18" fill="#FFCC00" opacity="0.85" transform="rotate(90)"/><ellipse cx="13" cy="13" rx="11" ry="18" fill="#4CD964" opacity="0.85" transform="rotate(135)"/><ellipse cx="0" cy="18" rx="11" ry="18" fill="#5AC8FA" opacity="0.85" transform="rotate(180)"/><ellipse cx="-13" cy="13" rx="11" ry="18" fill="#5856D6" opacity="0.85" transform="rotate(225)"/><ellipse cx="-18" cy="0" rx="11" ry="18" fill="#5856D6" opacity="0.85" transform="rotate(270)"/><ellipse cx="-13" cy="-13" rx="11" ry="18" fill="#FF2D55" opacity="0.85" transform="rotate(315)"/></g></svg>` },
+            { id: 'weather', name: '날씨', svg: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect width="100" height="100" fill="#34AADC"/><circle cx="36" cy="36" r="16" fill="#FFCC00"/><path d="M30 68 C 24 68, 20 62, 22 56 C 24 50, 32 48, 36 50 C 40 42, 54 42, 58 50 C 64 50, 70 54, 68 62 C 68 68, 62 68, 58 68 Z" fill="#FFFFFF" opacity="0.95"/></svg>` },
+            { id: 'phone', name: '전화', svg: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect width="100" height="100" fill="#4CD964"/><path d="M36 28 C34 28 30 32 30 36 C30 52 48 70 64 70 C68 70 72 66 72 64 L66 54 C64 52 60 52 58 54 L54 58 C46 54 46 46 42 38 L46 34 C48 32 48 28 46 26 Z" fill="#FFFFFF"/></svg>` },
+            { id: 'calendar', name: '달력', svg: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect width="100" height="100" fill="#FFFFFF"/><rect width="100" height="28" fill="#FF3B30"/><text x="50" y="20" font-size="13" font-weight="bold" fill="#FFFFFF" text-anchor="middle">OCT</text><text x="50" y="76" font-size="44" font-weight="200" fill="#000000" text-anchor="middle">15</text></svg>` },
+            { id: 'settings', name: '설정', svg: `<svg viewBox="0 0 100 100" class="w-full h-full"><rect width="100" height="100" fill="#8E8E93"/><g transform="translate(50,50)"><circle cx="0" cy="0" r="28" fill="none" stroke="#E5E5EA" stroke-width="8" stroke-dasharray="14 6"/><circle cx="0" cy="0" r="16" fill="#8E8E93"/><circle cx="0" cy="0" r="10" fill="#E5E5EA"/></g></svg>` }
+          ]
+        };
+      },
+      mounted() {
+        this.updateClock();
+        setInterval(this.updateClock, 1000);
+        
+        /* 音频控制初始化 */
+        this.audioElement = new Audio();
+        this.audioElement.addEventListener('timeupdate', () => {
+          this.audioState.currentTime = this.audioElement.currentTime;
+          this.audioState.duration = this.audioElement.duration || 0;
+        });
+        this.audioElement.addEventListener('ended', () => {
+          this.audioState.isPlaying = false;
+        });
+
+        /* 持续更新弹窗循环（3秒自动消失 + 去重 + 动态累加） */
+        setInterval(() => {
+          if (!this.story.isLocked && !this.activeNotification) {
+            const unshownPool = NOTIF_POOL.filter(n => !this.shownNotifIds.has(n.id));
+            if (unshownPool.length === 0) return;
+
+            const notif = unshownPool[Math.floor(Math.random() * unshownPool.length)];
+            this.shownNotifIds.add(notif.id);
+
+            setTimeout(() => {
+              if (!this.activeNotification) {
+                this.triggerNotification(notif);
+                this.syncNotificationToAppData(notif);
+              }
+            }, 800);
+          }
+        }, 5500);
+      },
+      methods: {
+        updateClock() {
+          const now = new Date();
+          this.currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        },
+        lockTouchStart(e) { if (this.story.isLocked) this.lockTouchStartY = e.touches[0].clientY; },
+        lockTouchEnd(e) {
+          if (this.story.isLocked && e.changedTouches[0].clientY - this.lockTouchStartY < -40) {
+            this.showPasscodePad = true;
+          }
+        },
+        notifTouchStart(e) {
+          this.notifTouchStartY = e.touches[0].clientY;
+          this.isSwiping = true;
+        },
+        notifTouchMove(e) {
+          const diff = e.touches[0].clientY - this.notifTouchStartY;
+          if (diff < 0) {
+            this.notifOffsetY = diff;
+          }
+        },
+        notifTouchEnd(e) {
+          this.isSwiping = false;
+          if (this.notifOffsetY < -10) {
+            this.notifOffsetY = -150;
+            setTimeout(() => {
+              this.activeNotification = null;
+              this.notifOffsetY = 0;
+            }, 150);
+          } else {
+            this.notifOffsetY = 0;
+          }
+        },
+        closeNotification() {
+          this.activeNotification = null;
+          this.notifOffsetY = 0;
+        },
+        pressPasscode(num) {
+          if (this.inputPasscode.length < 4) {
+            this.inputPasscode += num;
+            if (this.inputPasscode === this.story.passcode) {
+              setTimeout(() => { this.story.isLocked = false; this.inputPasscode = ''; }, 150);
+            } else if (this.inputPasscode.length === 4) {
+              setTimeout(() => { this.inputPasscode = ''; }, 300);
+            }
+          }
+        },
+        openApp(appId) { this.story.activeApp = appId; },
+        goHome() { this.story.activeApp = null; },
+        getAppBadge(appId) {
+          if (appId === 'kakaotalk') return this.story.kakaotalk.contacts.reduce((acc, c) => acc + c.unread, 0);
+          return 0;
+        },
+        getAppIconSvg(appId) { return this.appList.find(a => a.id === appId)?.svg || ''; },
+        triggerNotification(notif) {
+          this.activeNotification = notif;
+          this.notifOffsetY = 0;
+          // 3秒后自动消失
+          setTimeout(() => { 
+            if (this.activeNotification === notif) { 
+              this.activeNotification = null; 
+              this.notifOffsetY = 0; 
+            } 
+          }, 3000);
+        },
+        syncNotificationToAppData(notif) {
+          if (notif.targetApp === 'kakaotalk') {
+            const contact = this.story.kakaotalk.contacts.find(c => c.id === (notif.chatId || 'mom'));
+            if (contact) { contact.unread++; contact.messages.push({ sender: contact.id, text: notif.message, cn: notif.cn, time: '방금' }); }
+          } else if (notif.targetApp === 'x') {
+            this.story.xTwitter.posts.unshift({
+              id: Date.now(), author: notif.title.replace('@', ''), handle: '@user',
+              avatar: DEFAULT_AVATAR_SVG,
+              content: notif.message, cn: notif.cn, time: '방금 전', stage: this.story.currentStage, isAnti: false
+            });
+          }
+        },
+        handleNotificationClick(notif) {
+          this.story.isLocked = false;
+          this.openApp(notif.targetApp);
+          this.activeNotification = null;
+        },
+        advanceStage(stageNum) { 
+          this.story.currentStage = stageNum; 
+          if (stageNum === 2) {
+            this.story.kakaotalk.contacts.find(c => c.id === 'apro').messages.push({
+              sender: 'apro', text: 'HEE, Death of Me 앨범 Apple Music 상단 등록 완료! 확인해봐!', cn: 'HEE，Death of Me 专辑已在 Apple Music 顶部上线！快去确认下！', time: '방금'
+            });
+          }
+        },
+        openLightbox(url) { this.lightboxUrl = url; },
+        closeLightbox() { this.lightboxUrl = null; },
+        
+        /* 🎵 准确音频播放控制 */
+        playSong(playlistId, trackIndex) {
+          const playlist = this.story.appleMusic.playlists.find(p => p.id === playlistId);
+          if (playlist && playlist.tracks[trackIndex]) {
+            const track = playlist.tracks[trackIndex];
+            this.audioState.currentSong = `${track.title} - ${track.artist}`;
+            this.audioState.isPlaying = true;
+            if (this.audioElement) {
+              this.audioElement.src = track.audioUrl;
+              this.audioElement.play().catch(e => console.log("Audio play caught", e));
+            }
+          }
+        },
+        togglePlay() {
+          if (!this.audioElement.src) {
+            this.playSong('hee', 0);
+            return;
+          }
+          if (this.audioState.isPlaying) {
+            this.audioElement.pause();
+            this.audioState.isPlaying = false;
+          } else {
+            this.audioElement.play().catch(e => console.log("Toggle error", e));
+            this.audioState.isPlaying = true;
+          }
+        },
+        seekAudio(targetSec) {
+          if (this.audioElement) {
+            this.audioElement.currentTime = targetSec;
+            this.audioState.currentTime = targetSec;
+          }
+        }
+      }
+    });
+
+    app.component('app-kakaotalk', AppKakaotalk);
+    app.component('app-x-twitter', AppXTwitter);
+    app.component('app-instagram', AppInstagram);
+    app.component('app-apple-music', AppAppleMusic);
+    app.component('app-safari', AppSafari);
+    app.component('app-notes', AppNotes);
+    app.component('app-settings', AppSettings);
+    app.component('app-weather', AppWeather);
+    app.component('app-phone', AppPhone);
+    app.component('app-calendar', AppCalendar);
+    app.component('app-photos', AppPhotos);
+
+    app.mount('#app');
+  </script>
+</body>
+</html>
